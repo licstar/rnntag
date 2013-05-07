@@ -14,7 +14,7 @@
 
 using namespace std;
 
-const int H = 55; //隐藏层 = input_size （双向的时候可以设置为两倍）
+const int H = 50; //隐藏层（单向的隐含层尺寸，总的隐含层尺寸应该是这个的两倍）
 const int MAX_C = 50; //最大分类数
 const int MAX_F = 300; //输入层最大的大小
 const int FEATURE_SIZE = 1;
@@ -26,7 +26,7 @@ const char *valid_file = "valid.txt";
 const char *test_file = "test.txt";
 
 int class_size; //分类数
-const int input_size = FEATURE_SIZE==1?55:60; //特征数，同vector_size，输入层大小
+const int input_size = (FEATURE_SIZE==1?55:60) + H; //特征数，包含当前节点输入的特征大小55~60，以及一个隐含层的大小
 
 //===================== 所有要优化的参数 =====================
 struct embedding_t{
@@ -183,13 +183,16 @@ double checkCase(data_t *id, double *state, double *nextState, double *backState
 				x[j] = em.value[offset + k];
 			}
 		}
+
+		for(int k = 0; k < H; k++,j++){
+			x[j] = state[k];
+		}
 	}
 
-
 	double h[H] = {0};
-	fastmult(B, state, h, input_size, H);
+	fastmult(B, x, h, input_size, H); //h = B*x
 	for(int i = 0; i < H; i++){
-		nextState[i] = h[i] = sigmoid(h[i] + x[i]);
+		nextState[i] = h[i] = sigmoid(h[i]); //TODO 可能改成tanh会更均匀
 	}
 	//for(int i = 0, k=0; i < H; i++){
 	//	for(int j = 0; j < input_size; j++,k++){
@@ -228,17 +231,36 @@ double checkCase(data_t *id, double *state, double *nextState, double *backState
 			dh[j] *= h[j]*(1-h[j]);
 		}
 
+
+		for(int i = 0; i < class_size; i++){
+			double v = (i==ans?1:0) - y[i];
+			for(int j = 0; j < H; j++){
+				int t = i*H+j;
+				A[t] += alpha * (v * h[j] - lambda * A[t]);
+			}
+		}
+
+		double dx[MAX_F] = {0};
+		for(int i = 0; i < H; i++){
+			for(int j = 0; j < input_size; j++){
+				dx[j] += dh[i] * B[i*input_size+j];
+			}
+		}
+
+		for(int i = 0; i < H; i++){
+			for(int j = 0; j < input_size; j++){
+				int t = i*input_size+j;
+				B[t] += alpha * (state[j] * dh[i] - lambda * B[t]);
+			}
+		}
+
 		{
 			int offset;
 			int j = 0;
-			if(iter > 10 || !withinit){
-				offset = id->word * words.element_size;
-				for(int k = 0; k < words.element_size; k++,j++){
-					int t = offset + k;
-					words.value[t] += alpha * (dh[j] - lambda * words.value[t]);
-				}
-			}else{
-				j = words.element_size;
+			offset = id->word * words.element_size;
+			for(int k = 0; k < words.element_size; k++,j++){
+				int t = offset + k;
+				words.value[t] += alpha * (dx[j] - lambda * words.value[t]);
 			}
 
 			for(int f = 0; f < FEATURE_SIZE; f++){
@@ -246,40 +268,14 @@ double checkCase(data_t *id, double *state, double *nextState, double *backState
 				offset = id->f[f] * em.element_size;
 				for(int k = 0; k < em.element_size; k++,j++){
 					int t = offset + k;
-					em.value[t] += alpha * (dh[j] - lambda * em.value[t]);
+					em.value[t] += alpha * (dx[j] - lambda * em.value[t]);
 				}
 			}
+
+			//TODO 如果用BPTT，需要把后面部分的dx继续传递下去
 		}
 
-		//#pragma omp critical
-		{
-			for(int i = 0; i < class_size; i++){
-				double v = (i==ans?1:0) - y[i];
-				for(int j = 0; j < H; j++){
-					int t = i*H+j;
-					A[t] += alpha * (v * h[j] - lambda * A[t]);
-					//gA[i*H+j] += v * h[j];
-				}
-			}
-
-			for(int i = 0; i < H; i++){
-				for(int j = 0; j < input_size; j++){
-					int t = i*input_size+j;
-					B[t] += alpha * (state[j] * dh[i] - lambda * B[t]);
-					//gB[i*input_size+j] += -x[j] * dh[i];
-				}
-			}
-
-			/*double dx[MAX_F] = {0};
-
-			for(int i = 0; i < H; i++){
-				for(int j = 0; j < input_size; j++){
-					dx[j] += dh[i] * B[i*input_size+j];
-				}
-			}*/
-
-
-		}
+		
 	}
 
 	bool ok = true;
@@ -319,7 +315,7 @@ double checkSet(dataset_t &data, int &correct, int &correctU){
 			state = nextState;
 		}
 
-		//逆向修正
+		//逆向求状态
 		for(int j = 0; j < H; j++) state[j] = 0.1;
 		for(int j = (int)dr.size()-1; j >= 0; j--){
 			vector<double> nextState(H);
@@ -525,7 +521,7 @@ int main(){
 
 			if (cnt > lastcnt+100){
 				lastcnt = cnt;
-				//printf("%cIter: %3d\t   Progress: %.2f%%   Words/sec: %.1f ", 13, iter, 100.*cnt/N, cnt/(getTime()-lastTime));
+				printf("%cIter: %3d\t   Progress: %.2f%%   Words/sec: %.1f ", 13, iter, 100.*cnt/N, cnt/(getTime()-lastTime));
 			}
 			
 		}
@@ -540,7 +536,7 @@ int main(){
 		//	//	printf("%cIter: %3d\t   Progress: %.2f%%   Words/sec: %.1f ", 13, iter, 100.*i/N, i/(getTime()-lastTime));
 		//	}
 		//}
-		//printf("%c", 13);
+		printf("%c", 13);
 	}
 	return 0;
 }
