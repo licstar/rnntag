@@ -13,7 +13,7 @@
 #endif
 
 using namespace std;
-
+//
 const int H = 55; //隐藏层 = input_size （双向的时候可以设置为两倍）
 const int MAX_C = 50; //最大分类数
 const int MAX_F = 300; //输入层最大的大小
