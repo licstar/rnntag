@@ -168,12 +168,16 @@ void fastmult(double *A, double *x, double *b, int xlen, int blen){
 double checkCase(data_t *id, double *state, double *nextState, double *backState,
 				 double *A, double *B, double *bA,
 				 int ans, int &correct, bool gd = false){
+	int wv_offset = 50;
+	if(A == fA){
+		wv_offset = 0;
+	}
 	double x[MAX_F];
 	{
 		int j = 0;
 		int offset = id->word * words.element_size;
-		for(int k = 0; k < words.element_size; k++,j++){
-			x[j] = words.value[offset + k];
+		for(int k = 0; k < 50; k++,j++){
+			x[j] = words.value[offset + k + wv_offset];
 		}
 
 		for(int f = 0; f < FEATURE_SIZE; f++){
@@ -233,8 +237,8 @@ double checkCase(data_t *id, double *state, double *nextState, double *backState
 			int j = 0;
 			if(iter > 10 || !withinit){
 				offset = id->word * words.element_size;
-				for(int k = 0; k < words.element_size; k++,j++){
-					int t = offset + k;
+				for(int k = 0; k < 50; k++,j++){
+					int t = offset + k + wv_offset;
 					words.value[t] += alpha * (dh[j] - lambda * words.value[t]);
 				}
 			}else{
@@ -406,7 +410,7 @@ int main(){
 
 	init(train_file);
 
-	words.init(50, 130000);
+	words.init(100, 130000);
 	features[0].init(5, 5);
 	if(FEATURE_SIZE > 1)
 		features[1].init(5, 455);
@@ -444,9 +448,11 @@ int main(){
 
 	
 	for(int i = 0; i < words.element_num; i++){
-		for(int j = 0; j < words.element_size; j++){
-			if(withinit)
+		for(int j = 0; j < 50; j++){
+			if(withinit){
 				words.value[i * words.element_size + j] = senna_raw_words[i].vec[j];
+				words.value[i * words.element_size + j + 50] = senna_raw_words[i].vec[j];
+			}
 		}
 	}
 	
