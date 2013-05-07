@@ -11,9 +11,9 @@
 #else
 #include <time.h>
 #endif
-//
+
 using namespace std;
-//
+
 const int H = 55; //隐藏层 = input_size （双向的时候可以设置为两倍）
 const int MAX_C = 50; //最大分类数
 const int MAX_F = 300; //输入层最大的大小
@@ -27,8 +27,6 @@ const char *test_file = "test.txt";
 
 int class_size; //分类数
 const int input_size = FEATURE_SIZE==1?55:60; //特征数，同vector_size，输入层大小
-//int window_size; //窗口大小
-//int vector_size; //一个词单元的向量大小 = 词向量大小（约50） + 所有特征的大小（约10）
 
 //===================== 所有要优化的参数 =====================
 struct embedding_t{
@@ -105,15 +103,6 @@ double getTime(){
 
 double nextDouble(){
 	return rand() / (RAND_MAX + 1.0);
-}
-
-double sampleNormal() {
-    double u = ((double) rand() / (RAND_MAX + 1.0)) * 2 - 1;
-    double v = ((double) rand() / (RAND_MAX + 1.0)) * 2 - 1;
-    double r = u * u + v * v;
-    if (r == 0 || r > 1) return sampleNormal();
-    double c = sqrt(-2 * log(r) / r);
-    return u * c;
 }
 
 void softmax(double hoSums[], double result[], int n){
