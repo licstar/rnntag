@@ -99,7 +99,7 @@ double getTime(){
 	gettimeofday(&tv, 0);
 	return tv.tv_sec + tv.tv_usec * 1e-6;
 #else
-	return 0;
+	return clock() / (1.0+CLOCKS_PER_SEC);
 #endif
 }
 
