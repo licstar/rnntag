@@ -11,7 +11,7 @@
 #else
 #include <time.h>
 #endif
-
+//
 using namespace std;
 
 const int H = 55; //隐藏层 = input_size （双向的时候可以设置为两倍）
@@ -99,7 +99,7 @@ double getTime(){
 	gettimeofday(&tv, 0);
 	return tv.tv_sec + tv.tv_usec * 1e-6;
 #else
-	return clock() / (1.0+CLOCKS_PER_SEC);
+	return 1.0 * clock() / CLOCKS_PER_SEC;
 #endif
 }
 
