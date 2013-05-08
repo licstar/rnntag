@@ -43,8 +43,10 @@ struct embedding_t{
 	}
 };
 
-embedding_t words; //词向量
-embedding_t features[FEATURE_SIZE]; //除了词向量之外的其它特征
+embedding_t wordsForward; //词向量
+embedding_t wordsBack; //词向量
+embedding_t featuresForward[FEATURE_SIZE]; //除了词向量之外的其它特征
+embedding_t featuresBack[FEATURE_SIZE]; //除了词向量之外的其它特征
 
 double *fA; //特征矩阵：[分类数][隐藏层] 第二层的权重
 double *fB; //特征矩阵：[隐藏层][特征数] 第一层的权重
@@ -168,16 +170,18 @@ void fastmult(double *A, double *x, double *b, int xlen, int blen){
 double checkCase(data_t *id, double *state, double *nextState, double *backState,
 				 double *A, double *B, double *bA,
 				 int ans, int &correct, bool gd = false){
-	int wv_offset = 50;
+	embedding_t words = wordsBack;
+	embedding_t *features = featuresBack;
 	if(A == fA){
-		wv_offset = 0;
+		words = wordsForward;
+		features = featuresForward;
 	}
 	double x[MAX_F];
 	{
 		int j = 0;
 		int offset = id->word * words.element_size;
-		for(int k = 0; k < 50; k++,j++){
-			x[j] = words.value[offset + k + wv_offset];
+		for(int k = 0; k < words.element_size; k++,j++){
+			x[j] = words.value[offset + k];
 		}
 
 		for(int f = 0; f < FEATURE_SIZE; f++){
@@ -237,8 +241,8 @@ double checkCase(data_t *id, double *state, double *nextState, double *backState
 			int j = 0;
 			if(iter > 10 || !withinit){
 				offset = id->word * words.element_size;
-				for(int k = 0; k < 50; k++,j++){
-					int t = offset + k + wv_offset;
+				for(int k = 0; k < words.element_size; k++,j++){
+					int t = offset + k;
 					words.value[t] += alpha * (dh[j] - lambda * words.value[t]);
 				}
 			}else{
@@ -310,15 +314,15 @@ double checkSet(dataset_t &data, int &correct, int &correctU){
 	double ret = 0;
 	for(size_t i = 0; i < data.size(); i++){
 		dataRecord_t &dr = data[i];
-		int tc = 0;
 		vector<double> state(H);
 		vector<vector<double> > states;
 
 		//正向求状态
 		for(int j = 0; j < H; j++) state[j] = 0.1;
 		for(size_t j = 0; j < dr.size(); j++){
+			int tc = 0;
 			vector<double> nextState(H);
-			checkCase(&dr[j].first, &state[0], &nextState[0], NULL, fA, fB, bA, dr[j].second, correct);
+			checkCase(&dr[j].first, &state[0], &nextState[0], NULL, fA, fB, bA, dr[j].second, tc);
 			states.push_back(nextState);
 			state = nextState;
 		}
@@ -326,8 +330,9 @@ double checkSet(dataset_t &data, int &correct, int &correctU){
 		//逆向修正
 		for(int j = 0; j < H; j++) state[j] = 0.1;
 		for(int j = (int)dr.size()-1; j >= 0; j--){
+			int tc = 0;
 			vector<double> nextState(H);
-			double tv = checkCase(&dr[j].first, &state[0], &nextState[0], &states[j][0], bA, bB, fA, dr[j].second, correct);
+			double tv = checkCase(&dr[j].first, &state[0], &nextState[0], &states[j][0], bA, bB, fA, dr[j].second, tc);
 			state = nextState;
 		
 			ret += tv;
@@ -359,12 +364,12 @@ double check(){
 	for(int i = 0; i < H*input_size; i++,pnum++){
 		ps += fB[i]*fB[i];
 	}
-	for(int i = 0; i < words.size; i++,pnum++){
-		ps += words.value[i]*words.value[i];
+	for(int i = 0; i < wordsForward.size; i++,pnum++){
+		ps += wordsForward.value[i]*wordsForward.value[i];
 	}
 	for(int k = 0; k < FEATURE_SIZE; k++){
-		for(int i = 0; i < features[k].size; i++,pnum++){
-			ps += features[k].value[i]*features[k].value[i];
+		for(int i = 0; i < featuresForward[k].size; i++,pnum++){
+			ps += featuresForward[k].value[i]*featuresForward[k].value[i];
 		}
 	}
 
@@ -374,7 +379,7 @@ double check(){
 	sprintf(fname, "%s_B", model_name);
 	writeFile(fname, fB, H*input_size);
 	sprintf(fname, "%s_w", model_name);
-	writeFile(fname, words.value, words.size);
+	writeFile(fname, wordsForward.value, wordsForward.size);
 	//特征等要的时候再存
 	//sprintf(fname, "%s_f1", model_name);
 	//writeFile(fname, features[1].value, features[1].size);
@@ -404,16 +409,16 @@ int main(){
 
 	class_size = 45;
 
-	//input_size = 55;
-	//if(FEATURE_SIZE == 2)
-	//	input_size = 60; 
-
 	init(train_file);
 
-	words.init(100, 130000);
-	features[0].init(5, 5);
-	if(FEATURE_SIZE > 1)
-		features[1].init(5, 455);
+	wordsForward.init(50, 130000);
+	wordsBack.init(50, 130000);
+	featuresForward[0].init(5, 5);
+	featuresBack[0].init(5, 5);
+	if(FEATURE_SIZE > 1){
+		featuresForward[1].init(5, 455);
+		featuresBack[1].init(5, 455);
+	}
 
 	printf("read data\n");
 	readAllData(train_file, "Train", data, N, uN);
@@ -421,7 +426,7 @@ int main(){
 	readAllData(test_file, "Test", tdata, tN, utN);
 
 	printf("init. input(features):%d, hidden:%d, output(classes):%d, alpha:%lf, lambda:%.16lf\n", input_size, H, class_size, alpha, lambda);
-	printf("vocab_size:%d\n", words.element_num);
+	printf("vocab_size:%d\n", wordsForward.element_num);
 
 	fA = new double[class_size*H];
 	fB = new double[H*input_size];
@@ -437,21 +442,23 @@ int main(){
 		fB[i] = nextDouble()-0.5;
 		bB[i] = nextDouble()-0.5;
 	}
-	for(int i = 0; i < words.size; i++){
-		words.value[i] = nextDouble()-0.5;
+	for(int i = 0; i < wordsForward.size; i++){
+		wordsForward.value[i] = nextDouble()-0.5;
+		wordsBack.value[i] = nextDouble()-0.5;
 	}
 	for(int k = 0; k < FEATURE_SIZE; k++){
-		for(int i = 0; i < features[k].size; i++){
-			features[k].value[i] = nextDouble()-0.5;
+		for(int i = 0; i < featuresForward[k].size; i++){
+			featuresForward[k].value[i] = nextDouble()-0.5;
+			featuresBack[k].value[i] = nextDouble()-0.5;
 		}
 	}
 
 	
-	for(int i = 0; i < words.element_num; i++){
-		for(int j = 0; j < 50; j++){
+	for(int i = 0; i < wordsForward.element_num; i++){
+		for(int j = 0; j < wordsForward.element_size; j++){
 			if(withinit){
-				words.value[i * words.element_size + j] = senna_raw_words[i].vec[j];
-				words.value[i * words.element_size + j + 50] = senna_raw_words[i].vec[j];
+				wordsForward.value[i * wordsForward.element_size + j] = senna_raw_words[i].vec[j];
+				wordsBack.value[i * wordsBack.element_size + j] = senna_raw_words[i].vec[j];
 			}
 		}
 	}
