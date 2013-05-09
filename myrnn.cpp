@@ -21,6 +21,9 @@ const int FEATURE_SIZE = 1;
 const char *model_name = "model_300_nosuff_noinit";
 const bool withinit = true;
 
+const int bptt = 3;
+const int bptt_block = 10;
+
 const char *train_file = "train.txt";
 const char *valid_file = "valid.txt";
 const char *test_file = "test.txt";
@@ -43,6 +46,7 @@ struct embedding_t{
 	}
 };
 
+//===================== 需要优化的参数 =====================
 embedding_t wordsForward; //词向量
 embedding_t wordsBack; //词向量
 embedding_t featuresForward[FEATURE_SIZE]; //除了词向量之外的其它特征
@@ -53,7 +57,19 @@ double *fB; //特征矩阵：[隐藏层][特征数] 第一层的权重
 double *bA; //特征矩阵：[分类数][隐藏层] 第二层的权重
 double *bB; //特征矩阵：[隐藏层][特征数] 第一层的权重
 
-//double *gA, *gB;
+//===================== 导数（都是临时变量，一般都保持为0） =====================
+double *gA, *gB; //特征矩阵
+
+//===================== 备份参数 =====================
+embedding_t wordsForward_b; //词向量
+embedding_t wordsBack_b; //词向量
+embedding_t featuresForward_b[FEATURE_SIZE]; //除了词向量之外的其它特征
+embedding_t featuresBack_b[FEATURE_SIZE]; //除了词向量之外的其它特征
+
+double *fA_b; //特征矩阵：[分类数][隐藏层] 第二层的权重
+double *fB_b; //特征矩阵：[隐藏层][特征数] 第一层的权重
+double *bA_b; //特征矩阵：[分类数][隐藏层] 第二层的权重
+double *bB_b; //特征矩阵：[隐藏层][特征数] 第一层的权重
 
 //===================== 已知数据 =====================
 struct data_t{
@@ -167,9 +183,45 @@ void fastmult(double *A, double *x, double *b, int xlen, int blen){
 	}
 }
 
+void setInputVector(data_t *id, embedding_t words, embedding_t *features, double *x){
+	int j = 0;
+	int offset = id->word * words.element_size;
+	for(int k = 0; k < words.element_size; k++,j++){
+		x[j] = words.value[offset + k];
+	}
+
+	for(int f = 0; f < FEATURE_SIZE; f++){
+		embedding_t &em = features[f];
+		offset = id->f[f] * em.element_size;
+		for(int k = 0; k < em.element_size; k++,j++){
+			x[j] = em.value[offset + k];
+		}
+	}
+}
+
+void updateInputVector(data_t *id, embedding_t words, embedding_t *features, double *dx){
+	int offset;
+	int j = 0;
+
+	offset = id->word * words.element_size;
+	for(int k = 0; k < words.element_size; k++,j++){
+		int t = offset + k;
+		words.value[t] += alpha * (dx[j] - lambda * words.value[t]);
+	}
+
+	for(int f = 0; f < FEATURE_SIZE; f++){
+		embedding_t &em = features[f];
+		offset = id->f[f] * em.element_size;
+		for(int k = 0; k < em.element_size; k++,j++){
+			int t = offset + k;
+			em.value[t] += alpha * (dx[j] - lambda * em.value[t]);
+		}
+	}
+}
+
 double checkCase(data_t *id, double *state, double *nextState, double *backState,
 				 double *A, double *B, double *bA,
-				 int ans, int &correct, bool gd = false){
+				 int ans, int &correct, bool gd = false, double *dState = NULL){
 	embedding_t words = wordsBack;
 	embedding_t *features = featuresBack;
 	if(A == fA){
@@ -177,22 +229,7 @@ double checkCase(data_t *id, double *state, double *nextState, double *backState
 		features = featuresForward;
 	}
 	double x[MAX_F];
-	{
-		int j = 0;
-		int offset = id->word * words.element_size;
-		for(int k = 0; k < words.element_size; k++,j++){
-			x[j] = words.value[offset + k];
-		}
-
-		for(int f = 0; f < FEATURE_SIZE; f++){
-			embedding_t &em = features[f];
-			offset = id->f[f] * em.element_size;
-			for(int k = 0; k < em.element_size; k++,j++){
-				x[j] = em.value[offset + k];
-			}
-		}
-	}
-
+	setInputVector(id, words, features, x);
 
 	double h[H] = {0};
 	fastmult(B, state, h, input_size, H);
@@ -227,66 +264,28 @@ double checkCase(data_t *id, double *state, double *nextState, double *backState
 	softmax(r, y, class_size);
 
 	if(gd){ //修改参数
+
+		//矩阵 A 直接更新
+		for(int i = 0; i < class_size; i++){
+			double v = (i==ans?1:0) - y[i];
+			for(int j = 0; j < H; j++){
+				int t = i*H+j;
+				A[t] += alpha * (v * h[j] - lambda * A[t]);
+			}
+		}
+
+		//隐含层的变化量
 		double dh[H] = {0};
 		for(int j = 0; j < H; j++){
 			dh[j] = A[ans*H+j];
 			for(int i = 0; i < class_size; i++){
 				dh[j] -= y[i]*A[i*H+j];
 			}
-			dh[j] *= h[j]*(1-h[j]);
 		}
 
-		{
-			int offset;
-			int j = 0;
-			if(iter > 10 || !withinit){
-				offset = id->word * words.element_size;
-				for(int k = 0; k < words.element_size; k++,j++){
-					int t = offset + k;
-					words.value[t] += alpha * (dh[j] - lambda * words.value[t]);
-				}
-			}else{
-				j = words.element_size;
-			}
-
-			for(int f = 0; f < FEATURE_SIZE; f++){
-				embedding_t &em = features[f];
-				offset = id->f[f] * em.element_size;
-				for(int k = 0; k < em.element_size; k++,j++){
-					int t = offset + k;
-					em.value[t] += alpha * (dh[j] - lambda * em.value[t]);
-				}
-			}
-		}
-
-		//#pragma omp critical
-		{
-			for(int i = 0; i < class_size; i++){
-				double v = (i==ans?1:0) - y[i];
-				for(int j = 0; j < H; j++){
-					int t = i*H+j;
-					A[t] += alpha * (v * h[j] - lambda * A[t]);
-					//gA[i*H+j] += v * h[j];
-				}
-			}
-
-			for(int i = 0; i < H; i++){
-				for(int j = 0; j < input_size; j++){
-					int t = i*input_size+j;
-					B[t] += alpha * (state[j] * dh[i] - lambda * B[t]);
-					//gB[i*input_size+j] += -x[j] * dh[i];
-				}
-			}
-
-			/*double dx[MAX_F] = {0};
-
-			for(int i = 0; i < H; i++){
-				for(int j = 0; j < input_size; j++){
-					dx[j] += dh[i] * B[i*input_size+j];
-				}
-			}*/
-
-
+		//保存这次的隐藏层变化量
+		for(int j = 0; j < H; j++){
+			dState[j] = dh[j];
 		}
 	}
 
@@ -301,6 +300,57 @@ double checkCase(data_t *id, double *state, double *nextState, double *backState
 	return log(y[ans]); //计算似然
 }
 
+
+void BPTT(vector<vector<double> > &states, vector<vector<double> > &dStates, vector<data_t> &data,
+		  embedding_t words, embedding_t *features, double *B){
+	int len = (int)states.size();
+
+	double dh[H];
+	//初始化隐藏层
+	for(int i = 0; i < H; i++){
+		dh[i] = dStates[len-1][i];
+		dStates[len-1][i] = 0; //梯度只用一次（可以像rnnlm考虑复用试试）
+	}
+	//终止条件：不走到初始层；bptt的总次数符合预设（在句子结尾处可能会多迭代几层，不影响结果）
+	for(int pos = len-1,cnt=0; pos>0 && cnt<bptt+bptt_block-1; pos--,cnt++){ //边界一会再确定，限制：边缘、步数
+		vector<double> &h = states[pos];
+
+		//早一层
+		vector<double> &state = states[pos-1];
+		vector<double> &ds = dStates[pos-1];
+
+		//隐含层变化量求导
+		for(int i = 0; i < H; i++){
+			dh[i] *= h[i]*(1-h[i]);
+		}
+
+		data_t *id = &data[pos-1];
+		updateInputVector(id, words, features, dh);
+
+		double dx[MAX_F] = {0};
+		for(int i = 0; i < H; i++){
+			for(int j = 0; j < input_size; j++){
+				int t = i*input_size+j;
+				dx[j] += dh[i] * B[t]; //这里可以优化成矩阵乘法
+				gB[t] += state[j] * dh[i];
+			}
+		}
+
+		for(int i = 0; i < H; i++){
+			dh[i] = dx[i] + ds[i];
+			ds[i] = 0; //梯度只用一次（可以像rnnlm考虑复用试试）
+		}
+	}
+
+	for(int i = 0; i < H; i++){
+		for(int j = 0; j < input_size; j++){
+			int t = i*input_size+j;
+			B[t] += alpha * (gB[t] - lambda * B[t]);
+			gB[t] = 0;
+		}
+	}
+
+}
 
 void writeFile(const char *name, double *A, int size){
 	FILE *fout = fopen(name, "wb");
@@ -404,6 +454,34 @@ int readFile(const char *name){
 	return 1;
 }
 
+void saveNet(){
+	memcpy(fA_b, fA, sizeof(double)*class_size*H);
+	memcpy(fB_b, fB, sizeof(double)*H*input_size);
+	memcpy(bA_b, bA, sizeof(double)*class_size*H);
+	memcpy(bB_b, bB, sizeof(double)*H*input_size);
+
+	memcpy(wordsForward_b.value, wordsForward.value, sizeof(double)*wordsForward.size);
+	memcpy(wordsBack_b.value, wordsBack.value, sizeof(double)*wordsBack.size);
+	for(int i = 0; i < FEATURE_SIZE; i++){
+		memcpy(featuresForward_b[i].value, featuresForward[i].value, sizeof(double)*featuresForward[i].size);
+		memcpy(featuresBack_b[i].value, featuresBack[i].value, sizeof(double)*featuresBack[i].size);
+	}
+}
+
+void restoreNet(){
+	memcpy(fA, fA_b, sizeof(double)*class_size*H);
+	memcpy(fB, fB_b, sizeof(double)*H*input_size);
+	memcpy(bA, bA_b, sizeof(double)*class_size*H);
+	memcpy(bB, bB_b, sizeof(double)*H*input_size);
+
+	memcpy(wordsForward.value, wordsForward_b.value, sizeof(double)*wordsForward.size);
+	memcpy(wordsBack.value, wordsBack_b.value, sizeof(double)*wordsBack.size);
+	for(int i = 0; i < FEATURE_SIZE; i++){
+		memcpy(featuresForward[i].value, featuresForward_b[i].value, sizeof(double)*featuresForward[i].size);
+		memcpy(featuresBack[i].value, featuresBack_b[i].value, sizeof(double)*featuresBack[i].size);
+	}
+}
+
 int main(){
 	printf("read data size\n");
 
@@ -415,9 +493,17 @@ int main(){
 	wordsBack.init(50, 130000);
 	featuresForward[0].init(5, 5);
 	featuresBack[0].init(5, 5);
+
+	wordsForward_b.init(50, 130000);
+	wordsBack_b.init(50, 130000);
+	featuresForward_b[0].init(5, 5);
+	featuresBack_b[0].init(5, 5);
 	if(FEATURE_SIZE > 1){
 		featuresForward[1].init(5, 455);
 		featuresBack[1].init(5, 455);
+
+		featuresForward_b[1].init(5, 455);
+		featuresBack_b[1].init(5, 455);
 	}
 
 	printf("read data\n");
@@ -432,15 +518,24 @@ int main(){
 	fB = new double[H*input_size];
 	bA = new double[class_size*H];
 	bB = new double[H*input_size];
+	gA = new double[class_size*H];
+	gB = new double[H*input_size];
+
+	fA_b = new double[class_size*H];
+	fB_b = new double[H*input_size];
+	bA_b = new double[class_size*H];
+	bB_b = new double[H*input_size];
 
 	//if(!readFile("model_gd")){
 	for(int i = 0; i < class_size * H; i++){
 		fA[i] = nextDouble()-0.5;
 		bA[i] = nextDouble()-0.5;
+		gA[i] = 0;
 	}
 	for(int i = 0; i < H * input_size; i++){
 		fB[i] = nextDouble()-0.5;
 		bB[i] = nextDouble()-0.5;
+		gB[i] = 0;
 	}
 	for(int i = 0; i < wordsForward.size; i++){
 		wordsForward.value[i] = nextDouble()-0.5;
@@ -453,10 +548,9 @@ int main(){
 		}
 	}
 
-	
-	for(int i = 0; i < wordsForward.element_num; i++){
-		for(int j = 0; j < wordsForward.element_size; j++){
-			if(withinit){
+	if(withinit){
+		for(int i = 0; i < wordsForward.element_num; i++){
+			for(int j = 0; j < wordsForward.element_size; j++){
 				wordsForward.value[i * wordsForward.element_size + j] = senna_raw_words[i].vec[j];
 				wordsBack.value[i * wordsBack.element_size + j] = senna_raw_words[i].vec[j];
 			}
@@ -481,6 +575,13 @@ int main(){
 			alpha = max(0.0001, alpha);
 		}
 		lastLH = LH;
+		/*if(LH > lastLH){
+			alpha = alpha / 2;
+			restoreNet();
+		}else{
+			lastLH = LH;
+			saveNet();
+		}*/
 
 		int cnt = 0;
 		int lastcnt = 0;
@@ -500,6 +601,11 @@ int main(){
 			vector<double> state(H);
 			vector<vector<double> > states;
 
+			//BPTT使用的变量
+			vector<vector<double> > bpStates;
+			vector<vector<double> > bpDStates;
+			vector<data_t> bpData;
+
 			//正向求状态
 			for(int j = 0; j < H; j++) state[j] = 0.1;
 			for(size_t j = 0; j < dr.size(); j++){
@@ -511,14 +617,26 @@ int main(){
 
 			//逆向修正
 			for(int j = 0; j < H; j++) state[j] = 0.1;
-			for(int j = (int)dr.size()-1; j >= 0; j--){
+			bpStates.push_back(state);
+			bpDStates.push_back(state); //这个只是占位
+			for(int j = (int)dr.size()-1,t=0; j >= 0; j--,t++){
 				vector<double> nextState(H);
-				checkCase(&dr[j].first, &state[0], &nextState[0], &states[j][0], bA, bB, fA, dr[j].second, tc, true);
+				vector<double> dState(H);
+				checkCase(&dr[j].first, &state[0], &nextState[0], &states[j][0], bA, bB, fA, dr[j].second, tc, true, &dState[0]);
+				bpData.push_back(dr[j].first);
+				bpDStates.push_back(dState);
+				bpStates.push_back(nextState);
+				if((cnt + t) % bptt_block == 0 || j == 0) //判断执行bptt
+					BPTT(bpStates, bpDStates, bpData, wordsBack, featuresBack, bB);
 				state = nextState;
 			}
 
 			//逆向求状态
 			states.clear();
+			bpStates.clear();
+			bpDStates.clear();
+			bpData.clear();
+
 			for(int j = 0; j < H; j++) state[j] = 0.1;
 			for(int j = (int)dr.size()-1; j >= 0; j--){
 				vector<double> nextState(H);
@@ -529,9 +647,17 @@ int main(){
 
 			//正向修正
 			for(int j = 0; j < H; j++) state[j] = 0.1;
+			bpStates.push_back(state);
+			bpDStates.push_back(state); //占位
 			for(size_t j = 0; j < dr.size(); j++){
 				vector<double> nextState(H);
-				checkCase(&dr[j].first, &state[0], &nextState[0], &states[j][0], fA, fB, bA, dr[j].second, tc, true);
+				vector<double> dState(H);
+				checkCase(&dr[j].first, &state[0], &nextState[0], &states[j][0], fA, fB, bA, dr[j].second, tc, true, &dState[0]);
+				bpData.push_back(dr[j].first);
+				bpDStates.push_back(dState);
+				bpStates.push_back(nextState);
+				if(cnt % bptt_block == 0 || j == dr.size()-1) //判断执行bptt
+					BPTT(bpStates, bpDStates, bpData, wordsForward, featuresForward, fB);
 				state = nextState;
 				cnt++;
 			}
