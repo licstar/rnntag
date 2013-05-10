@@ -20,6 +20,7 @@ const int MAX_F = 300; //输入层最大的大小
 const int FEATURE_SIZE = 1;
 const char *model_name = "model_300_nosuff_noinit";
 const bool withinit = true;
+const bool stable = true;
 
 const int bptt = 3;
 const int bptt_block = 10;
@@ -465,11 +466,12 @@ int main(){
 	}
 
 	double lastLH = 1e100;
+	if(stable) alpha = 0.1;
 	while(1){
 		//计算正确率
 		printf("iter: %d, alpha:%lf, ", iter++, alpha);
 		double LH = check();
-		if(LH > lastLH){
+		if(stable && LH > lastLH){
 			alpha = alpha / 2;
 			alpha = max(0.0001, alpha);
 		}
@@ -478,12 +480,13 @@ int main(){
 		int cnt = 0;
 
 		double lastTime = getTime();
-		//memset(gA, 0, sizeof(double)*class_size*H);
-		//memset(gB, 0, sizeof(double)*H*input_size);
 
-		for(size_t i = 0; i < data.size(); i++){
-			swap(order[i], order[rand()%data.size()]);
+		if(!stable){ //稳定算法无需shuffle
+			for(size_t i = 0; i < data.size(); i++){
+				swap(order[i], order[rand()%data.size()]);
+			}
 		}
+		
 		for(size_t i = 0; i < data.size(); i++){
 			int j = 0;
 			int s = order[i+j];
