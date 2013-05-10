@@ -21,8 +21,8 @@ const int FEATURE_SIZE = 1;
 const char *model_name = "model_300_nosuff_noinit";
 const bool withinit = true;
 
-const int bptt = 3;
-const int bptt_block = 10;
+const int bptt = 1;
+const int bptt_block = 1;
 
 const char *train_file = "train.txt";
 const char *valid_file = "valid.txt";
@@ -230,6 +230,14 @@ double checkCase(data_t *id, double *state, double *nextState, int ans, int &cor
 	softmax(r, y, class_size);
 
 	if(gd){ //修改参数
+		//隐含层的变化量
+		double dh[H] = {0};
+		for(int j = 0; j < H; j++){
+			dh[j] = A[ans*H+j];
+			for(int i = 0; i < class_size; i++){
+				dh[j] -= y[i]*A[i*H+j];
+			}
+		}
 
 		//矩阵 A 直接更新
 		for(int i = 0; i < class_size; i++){
@@ -237,15 +245,6 @@ double checkCase(data_t *id, double *state, double *nextState, int ans, int &cor
 			for(int j = 0; j < H; j++){
 				int t = i*H+j;
 				A[t] += alpha * (v * h[j] - lambda * A[t]);
-			}
-		}
-
-		//隐含层的变化量
-		double dh[H] = {0};
-		for(int j = 0; j < H; j++){
-			dh[j] = A[ans*H+j];
-			for(int i = 0; i < class_size; i++){
-				dh[j] -= y[i]*A[i*H+j];
 			}
 		}
 
@@ -497,6 +496,8 @@ int main(){
 			vector<data_t> bpData;
 
 			for(int j = 0; j < H; j++) state[j] = 0.1;
+			bpDStates.push_back(state);
+			bpStates.push_back(state);
 			for(size_t j = 0; j < dr.size(); j++){
 				vector<double> nextState(H);
 				vector<double> dState(H);
