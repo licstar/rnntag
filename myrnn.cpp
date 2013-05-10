@@ -19,8 +19,9 @@ const int MAX_C = 50; //最大分类数
 const int MAX_F = 300; //输入层最大的大小
 const int FEATURE_SIZE = 1;
 const char *model_name = "model_300_nosuff_noinit";
-const bool withinit = true;
+const bool withinit = false;
 const bool stable = true;
+const int seed = 2;
 
 const int bptt = 3;
 const int bptt_block = 10;
@@ -408,6 +409,7 @@ int readFile(const char *name){
 }
 
 int main(){
+	srand(seed);
 	printf("read data size\n");
 
 	class_size = 45;
