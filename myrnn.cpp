@@ -21,8 +21,8 @@ const int FEATURE_SIZE = 1;
 const char *model_name = "model_300_nosuff_noinit";
 const bool withinit = true;
 
-const int bptt = 1;
-const int bptt_block = 1;
+const int bptt = 3;
+const int bptt_block = 10;
 
 const char *train_file = "train.txt";
 const char *valid_file = "valid.txt";
@@ -467,12 +467,13 @@ int main(){
 	double lastLH = 1e100;
 	while(1){
 		//计算正确率
-		printf("iter: %d, ", iter++);
+		printf("iter: %d, alpha:%lf, ", iter++, alpha);
 		double LH = check();
-		/*if(LH > lastLH){
-		alpha = 0.0001;
+		if(LH > lastLH){
+			alpha = alpha / 2;
+			alpha = max(0.0001, alpha);
 		}
-		lastLH = LH;*/
+		lastLH = LH;
 
 		int cnt = 0;
 
