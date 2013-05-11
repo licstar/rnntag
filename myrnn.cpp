@@ -19,9 +19,10 @@ const int MAX_C = 50; //最大分类数
 const int MAX_F = 300; //输入层最大的大小
 const int FEATURE_SIZE = 1;
 const char *model_name = "model_300_nosuff_noinit";
-const bool withinit = false;
-const bool stable = true;
-const int seed = 2;
+const bool withinit = true;
+const bool stable = false;
+const int delay = 1; //延迟两个节点看结果
+const int seed = 1;
 
 const int bptt = 3;
 const int bptt_block = 10;
@@ -61,6 +62,8 @@ struct data_t{
 	int word; //词的编号
 	int f[FEATURE_SIZE]; //其它特征，在POS里有：1.大写；2.后缀两个词
 };
+
+data_t padding; //delay使用的
 
 typedef vector<vector<pair<data_t, int> > > dataset_t;
 typedef vector<pair<data_t, int> > dataRecord_t;
@@ -232,29 +235,38 @@ double checkCase(data_t *id, double *state, double *nextState, int ans, int &cor
 	softmax(r, y, class_size);
 
 	if(gd){ //修改参数
-		//隐含层的变化量
-		double dh[H] = {0};
-		for(int j = 0; j < H; j++){
-			dh[j] = A[ans*H+j];
-			for(int i = 0; i < class_size; i++){
-				dh[j] -= y[i]*A[i*H+j];
-			}
-		}
-
-		//矩阵 A 直接更新
-		for(int i = 0; i < class_size; i++){
-			double v = (i==ans?1:0) - y[i];
+		if(ans == -1){
+			//前面delay个不做预测
 			for(int j = 0; j < H; j++){
-				int t = i*H+j;
-				A[t] += alpha * (v * h[j] - lambda * A[t]);
+				dState[j] = 0;
 			}
-		}
+		}else{
+			//隐含层的变化量
+			double dh[H] = {0};
+			for(int j = 0; j < H; j++){
+				dh[j] = A[ans*H+j];
+				for(int i = 0; i < class_size; i++){
+					dh[j] -= y[i]*A[i*H+j];
+				}
+			}
 
-		//保存这次的隐藏层变化量
-		for(int j = 0; j < H; j++){
-			dState[j] = dh[j];
+			//矩阵 A 直接更新
+			for(int i = 0; i < class_size; i++){
+				double v = (i==ans?1:0) - y[i];
+				for(int j = 0; j < H; j++){
+					int t = i*H+j;
+					A[t] += alpha * (v * h[j] - lambda * A[t]);
+				}
+			}
+
+			//保存这次的隐藏层变化量
+			for(int j = 0; j < H; j++){
+				dState[j] = dh[j];
+			}
 		}
 	}
+	if(ans == -1)
+		return 0;
 
 	bool ok = true;
 	for(int i = 0; i < class_size; i++){
@@ -329,19 +341,24 @@ double checkSet(dataset_t &data, int &correct, int &correctU){
 	correct = 0;
 	double ret = 0;
 	for(size_t i = 0; i < data.size(); i++){
+		dataRecord_t &dr = data[i];
 		double _state[H] = {0}, _state2[H];
 		for(int j = 0; j < H; j++) _state[j] = 0.1;
 		double *state = _state;
 		double *nextState = _state2;
-		for(size_t j = 0; j < data[i].size(); j++){
+		for(size_t j = 0; j < dr.size()+delay; j++){
 			//for(int s = 0; s < N; s++){
 			int tc = 0;
-			double tv = checkCase(&data[i][j].first, state, nextState, data[i][j].second, tc);
+			data_t &tword = j<dr.size()?dr[j].first:padding;
+			int ans = j>=delay?dr[j-delay].second:-1;
+			double tv = checkCase(&tword, state, nextState, ans, tc);
 
-			ret += tv;
-			correct += tc;
-			if(data[i][j].first.word == 1739){
-				correctU += tc;
+			if(j >= delay){
+				ret += tv;
+				correct += tc;
+				if(dr[j].first.word == 1739){
+					correctU += tc;
+				}
 			}
 			swap(state, nextState);
 		}
@@ -420,6 +437,10 @@ int main(){
 	features[0].init(5, 5);
 	if(FEATURE_SIZE > 1)
 		features[1].init(5, 455);
+
+	padding.word = 1738;
+	padding.f[0] = 0;
+	if(FEATURE_SIZE>1) padding.f[1] = 48;
 
 	printf("read data\n");
 	readAllData(train_file, "Train", data, N, uN);
@@ -502,22 +523,25 @@ int main(){
 			vector<data_t> bpData;
 
 			for(int j = 0; j < H; j++) state[j] = 0.1;
+			
 			bpDStates.push_back(state);
 			bpStates.push_back(state);
-			for(size_t j = 0; j < dr.size(); j++){
+			for(size_t j = 0; j < dr.size()+delay; j++){
 				vector<double> nextState(H);
 				vector<double> dState(H);
 				int tc = 0;
-				checkCase(&dr[j].first, &state[0], &nextState[0], dr[j].second, tc, true, &dState[0]);
-				bpData.push_back(dr[j].first);
+				data_t &tword = j<dr.size()?dr[j].first:padding;
+				int ans = j>=delay?dr[j-delay].second:-1;
+				checkCase(&tword, &state[0], &nextState[0], ans, tc, true, &dState[0]);
+				bpData.push_back(tword);
 				bpDStates.push_back(dState);
 				bpStates.push_back(nextState);
 
-				if(cnt % bptt_block == 0 || j == dr.size()-1) //判断执行bptt
+				if(j >= delay && (cnt % bptt_block == 0 || j == dr.size()+delay-1)) //判断执行bptt
 					BPTT(bpStates, bpDStates, bpData);
 
 				state = nextState;
-				cnt++;
+				if(j >= delay) cnt++;
 				if ((cnt%1000)==0){
 					//	printf("%cIter: %3d\t   Progress: %.2f%%   Words/sec: %.1f ", 13, iter, 100.*cnt/N, cnt/(getTime()-lastTime));
 				}
