@@ -14,12 +14,12 @@
 
 using namespace std;
 
-const int H = 55; //隐藏层 = input_size （双向的时候可以设置为两倍）
+const int H = 110; //隐藏层 = input_size （双向的时候可以设置为两倍）
 const int MAX_C = 50; //最大分类数
 const int MAX_F = 300; //输入层最大的大小
 const int FEATURE_SIZE = 1;
 const char *model_name = "model_300_nosuff_noinit";
-const bool withinit = true;
+const bool withinit = false;
 const bool stable = false;
 const int delay = 1; //延迟两个节点看结果
 const int seed = 1;
@@ -32,7 +32,7 @@ const char *valid_file = "valid.txt";
 const char *test_file = "test.txt";
 
 int class_size; //分类数
-const int input_size = FEATURE_SIZE==1?55:60; //特征数，同vector_size，输入层大小
+const int input_size = FEATURE_SIZE==1?110:120; //特征数，同vector_size，输入层大小
 
 //===================== 所有要优化的参数 =====================
 struct embedding_t{
@@ -433,10 +433,10 @@ int main(){
 
 	init(train_file);
 
-	words.init(50, 130000);
-	features[0].init(5, 5);
+	words.init(100, 130000);
+	features[0].init(10, 5);
 	if(FEATURE_SIZE > 1)
-		features[1].init(5, 455);
+		features[1].init(10, 455);
 
 	padding.word = 1738;
 	padding.f[0] = 0;
