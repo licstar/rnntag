@@ -14,12 +14,12 @@
 
 using namespace std;
 
-const int H = 110; //隐藏层 = input_size （双向的时候可以设置为两倍）
+const int H = 55; //隐藏层 = input_size （双向的时候可以设置为两倍）
 const int MAX_C = 50; //最大分类数
 const int MAX_F = 300; //输入层最大的大小
 const int FEATURE_SIZE = 1;
 const char *model_name = "model_300_nosuff_noinit";
-const bool withinit = false;
+const bool withinit = true;
 const bool stable = false;
 const int delay = 1; //延迟两个节点看结果
 const int seed = 1;
@@ -32,7 +32,7 @@ const char *valid_file = "valid.txt";
 const char *test_file = "test.txt";
 
 int class_size; //分类数
-const int input_size = FEATURE_SIZE==1?110:120; //特征数，同vector_size，输入层大小
+const int input_size = FEATURE_SIZE==1?55:60; //特征数，同vector_size，输入层大小
 
 //===================== 所有要优化的参数 =====================
 struct embedding_t{
@@ -51,6 +51,7 @@ struct embedding_t{
 
 embedding_t words; //词向量
 embedding_t features[FEATURE_SIZE]; //除了词向量之外的其它特征
+vector<double> initState(H);
 
 double *A; //特征矩阵：[分类数][隐藏层] 第二层的权重
 double *B; //特征矩阵：[隐藏层][特征数] 第一层的权重
@@ -318,6 +319,11 @@ void BPTT(vector<vector<double> > &states, vector<vector<double> > &dStates, vec
 			dh[i] = dx[i] + ds[i];
 			ds[i] = 0; //梯度只用一次（可以像rnnlm考虑复用试试）
 		}
+
+		if(pos == 1){ //修改初始变量
+			for(int i = 0; i < H; i++)
+				state[i] += alpha * dh[i];
+		}
 	}
 
 	for(int i = 0; i < H; i++){
@@ -343,7 +349,7 @@ double checkSet(dataset_t &data, int &correct, int &correctU){
 	for(size_t i = 0; i < data.size(); i++){
 		dataRecord_t &dr = data[i];
 		double _state[H] = {0}, _state2[H];
-		for(int j = 0; j < H; j++) _state[j] = 0.1;
+		for(int j = 0; j < H; j++) _state[j] = initState[j];
 		double *state = _state;
 		double *nextState = _state2;
 		for(size_t j = 0; j < dr.size()+delay; j++){
@@ -433,10 +439,10 @@ int main(){
 
 	init(train_file);
 
-	words.init(100, 130000);
-	features[0].init(10, 5);
+	words.init(50, 130000);
+	features[0].init(5, 5);
 	if(FEATURE_SIZE > 1)
-		features[1].init(10, 455);
+		features[1].init(5, 455);
 
 	padding.word = 1738;
 	padding.f[0] = 0;
@@ -471,6 +477,8 @@ int main(){
 			features[k].value[i] = nextDouble()-0.5;
 		}
 	}
+
+	for(int j = 0; j < H; j++) initState[j] = 0.1;
 
 	if(withinit){
 		for(int i = 0; i < words.element_num; i++){
@@ -522,10 +530,10 @@ int main(){
 			vector<vector<double> > bpDStates;
 			vector<data_t> bpData;
 
-			for(int j = 0; j < H; j++) state[j] = 0.1;
 			
-			bpDStates.push_back(state);
-			bpStates.push_back(state);
+			bpDStates.push_back(initState);
+			bpStates.push_back(initState);
+			state = initState;
 			for(size_t j = 0; j < dr.size()+delay; j++){
 				vector<double> nextState(H);
 				vector<double> dState(H);
@@ -546,7 +554,7 @@ int main(){
 					//	printf("%cIter: %3d\t   Progress: %.2f%%   Words/sec: %.1f ", 13, iter, 100.*cnt/N, cnt/(getTime()-lastTime));
 				}
 			}
-
+			initState = bpStates[0];
 
 		}
 		//for(int i = 0; i < vN; i++){
