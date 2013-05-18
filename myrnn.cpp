@@ -14,10 +14,10 @@
 
 using namespace std;
 
-const int H = 55; //隐藏层 = input_size （双向的时候可以设置为两倍）
+const int H = 60; //隐藏层 = input_size （双向的时候可以设置为两倍）
 const int MAX_C = 50; //最大分类数
 const int MAX_F = 300; //输入层最大的大小
-const int FEATURE_SIZE = 1;
+const int FEATURE_SIZE = 2;
 const char *model_name = "model_300_nosuff_noinit";
 const bool withinit = true;
 const bool stable = false;
@@ -531,7 +531,7 @@ int main(){
 			vector<data_t> bpData;
 
 			
-			bpDStates.push_back(initState);
+			bpDStates.push_back(state);
 			bpStates.push_back(initState);
 			state = initState;
 			for(size_t j = 0; j < dr.size()+delay; j++){
