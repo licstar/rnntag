@@ -19,7 +19,7 @@ const int MAX_C = 50; //最大分类数
 const int MAX_F = 300; //输入层最大的大小
 const int FEATURE_SIZE = 1;
 const char *model_name = "model_300_nosuff_noinit";
-const bool withinit = true;
+const bool withinit = false;
 const bool stable = false;
 const int delay = 1; //延迟两个节点看结果
 const int seed = 1;
@@ -91,7 +91,7 @@ int *tb; //目标矩阵[样本数] 测试集
 
 double time_start;
 double lambda = 0.0;//0.00000001; //正则项参数权重
-double alpha = 0.001; //学习速率
+double alpha = 0.01; //学习速率
 int iter = 0;
 
 const int thread_num = 4;
@@ -215,7 +215,8 @@ double checkCase(data_t *id, double *state, double *nextState, int ans, int &cor
 	double h[H] = {0};
 	fastmult(B, state, h, input_size, H);
 	for(int i = 0; i < H; i++){
-		nextState[i] = h[i] = sigmoid(h[i] + x[i]);
+		//nextState[i] = h[i] = sigmoid(h[i] + x[i]);
+		nextState[i] = h[i] = tanh(h[i] + x[i]);
 	}
 	//for(int i = 0, k=0; i < H; i++){
 	//	for(int j = 0; j < input_size; j++,k++){
@@ -255,7 +256,7 @@ double checkCase(data_t *id, double *state, double *nextState, int ans, int &cor
 				double v = (i==ans?1:0) - y[i];
 				for(int j = 0; j < H; j++){
 					int t = i*H+j;
-					A[t] += alpha * (v * h[j] - lambda * A[t]);
+					A[t] += alpha/sqrt(H) * (v * h[j] - lambda * A[t]);
 				}
 			}
 
@@ -299,7 +300,8 @@ void BPTT(vector<vector<double> > &states, vector<vector<double> > &dStates, vec
 
 		//隐含层变化量求导
 		for(int i = 0; i < H; i++){
-			dh[i] *= h[i]*(1-h[i]);
+			//dh[i] *= h[i]*(1-h[i]);
+			dh[i] *= 1-h[i]*h[i];
 		}
 
 		data_t *id = &data[pos-1];
@@ -323,7 +325,7 @@ void BPTT(vector<vector<double> > &states, vector<vector<double> > &dStates, vec
 	for(int i = 0; i < H; i++){
 		for(int j = 0; j < input_size; j++){
 			int t = i*input_size+j;
-			B[t] += alpha * (gB[t] - lambda * B[t]);
+			B[t] += alpha/sqrt(input_size+1) * (gB[t] - lambda * B[t]);
 			gB[t] = 0;
 		}
 	}
@@ -406,8 +408,8 @@ double check(){
 	//writeFile(fname, features[1].value, features[1].size);
 
 	double fret = -ret/N + ps/pnum*lambda/2;
-	printf("train: %lf %d/%d(%.2lf%%,%.2lf%%), valid: %lf %d/%d(%.2lf%%,%.2lf%%), test: %lf %d/%d(%.2lf%%,%.2lf%%) time:%.1lf\n",
-		-ret/N, correct, N, 100.*correct/N, 100.*correctU/uN,
+	printf("train: %lf+%lf %d/%d(%.2lf%%,%.2lf%%), valid: %lf %d/%d(%.2lf%%,%.2lf%%), test: %lf %d/%d(%.2lf%%,%.2lf%%) time:%.1lf\n",
+		-ret/N, ps/pnum*lambda/2, correct, N, 100.*correct/N, 100.*correctU/uN,
 		-ev/vN, correctValid, vN, 100.*correctValid/vN, 100.*correctValidU/uvN,
 		-et/tN, correctTest, tN, 100.*correctTest/tN, 100.*correctTestU/utN,
 		getTime()-time_start);
@@ -457,10 +459,10 @@ int main(){
 
 	//if(!readFile("model_gd")){
 	for(int i = 0; i < class_size * H; i++){
-		A[i] = nextDouble()-0.5;
+		A[i] = (nextDouble()-0.5) / sqrt(H);
 	}
 	for(int i = 0; i < H * input_size; i++){
-		B[i] = nextDouble()-0.5;
+		B[i] = (nextDouble()-0.5) / sqrt(input_size+1);
 		gB[i] = 0;
 	}
 	for(int i = 0; i < words.size; i++){
@@ -475,7 +477,7 @@ int main(){
 	if(withinit){
 		for(int i = 0; i < words.element_num; i++){
 			for(int j = 0; j < words.element_size; j++){
-				words.value[i * words.element_size + j] = senna_raw_words[i].vec[j];
+				words.value[i * words.element_size + j] = senna_raw_words[i].vec[j] / sqrt(12); //这个有待验证
 			}
 		}
 	}
